@@ -35,6 +35,13 @@ func resourceStorageBucket() *schema.Resource {
 			customdiff.ForceNewIfChange("retention_policy.0.is_locked", isPolicyLocked),
 		),
 
+		Timeouts: &schema.ResourceTimeout{
+			Create: schema.DefaultTimeout(4 * time.Minute),
+			Update: schema.DefaultTimeout(4 * time.Minute),
+			Read:   schema.DefaultTimeout(4 * time.Minute),
+			Delete: schema.DefaultTimeout(4 * time.Minute),
+		},
+
 		Schema: map[string]*schema.Schema{
 			"name": {
 				Type:        schema.TypeString,
@@ -589,7 +596,6 @@ func resourceStorageBucketUpdate(d *schema.ResourceData, meta interface{}) error
 	}
 
 	res, err := config.NewStorageClient(userAgent).Buckets.Patch(d.Get("name").(string), sb).Do()
-
 	if err != nil {
 		return err
 	}
@@ -651,7 +657,7 @@ func resourceStorageBucketRead(d *schema.ResourceData, meta interface{}) error {
 		var retryErr error
 		res, retryErr = config.NewStorageClient(userAgent).Buckets.Get(bucket).Do()
 		return retryErr
-	}, d.Timeout(schema.TimeoutCreate), isNotFoundRetryableError("bucket creation"))
+	}, d.Timeout(schema.TimeoutRead), isNotFoundRetryableError("bucket read"))
 
 	if err != nil {
 		return handleNotFoundError(err, d, fmt.Sprintf("Storage Bucket %q", d.Get("name").(string)))
@@ -732,6 +738,12 @@ func resourceStorageBucketRead(d *schema.ResourceData, meta interface{}) error {
 	} else {
 		if err := d.Set("uniform_bucket_level_access", false); err != nil {
 			return fmt.Errorf("Error setting uniform_bucket_level_access: %s", err)
+		}
+	}
+
+	if res.IamConfiguration != nil && res.IamConfiguration.PublicAccessPrevention != "" {
+		if err := d.Set("public_access_prevention", res.IamConfiguration.PublicAccessPrevention); err != nil {
+			return fmt.Errorf("Error setting public_access_prevention: %s", err)
 		}
 	}
 
@@ -1119,13 +1131,15 @@ func expandBucketWebsite(v interface{}) *storage.BucketWebsite {
 }
 
 func expandIamConfiguration(d *schema.ResourceData) *storage.BucketIamConfiguration {
-	return &storage.BucketIamConfiguration{
+	cfg := &storage.BucketIamConfiguration{
 		ForceSendFields: []string{"UniformBucketLevelAccess"},
 		UniformBucketLevelAccess: &storage.BucketIamConfigurationUniformBucketLevelAccess{
 			Enabled:         d.Get("uniform_bucket_level_access").(bool),
 			ForceSendFields: []string{"Enabled"},
 		},
 	}
+
+	return cfg
 }
 
 func expandStorageBucketLifecycle(v interface{}) (*storage.BucketLifecycle, error) {
